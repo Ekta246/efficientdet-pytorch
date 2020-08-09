@@ -32,7 +32,8 @@ from timm.models import resume_checkpoint, load_checkpoint
 from timm.utils import *
 from timm.optim import create_optimizer
 from timm.scheduler import create_scheduler
-
+from Detrac.detrac_dataset import Track_Dataset
+from Detrac import *
 torch.backends.cudnn.benchmark = True
 
 
@@ -240,11 +241,19 @@ def main():
 
     torch.manual_seed(args.seed + args.rank)
 
+    def freeze_backbone(m):
+            classname = m.__class__.__name__
+            for ntl in ['EfficientNet']:
+                if ntl in classname:
+                    for param in m.parameters():
+                        param.requires_grad = False
+    
+    
     model = create_model(
         args.model,
         bench_task='train',
         pretrained=args.pretrained,
-        pretrained_backbone=args.pretrained_backbone,
+        pretrained_backbone= args.pretrained_backbone,
         redundant_bias=args.redundant_bias,
         checkpoint_path=args.initial_checkpoint,
     )
@@ -255,6 +264,9 @@ def main():
     #     drop_block_rate=args.drop_block,
     input_size = model.config.image_size
 
+    model.apply(freeze_backbone)
+    print('[Info] freezed backbone')
+    
     if args.local_rank == 0:
         logging.info('Model %s created, param count: %d' %
                      (args.model, sum([m.numel() for m in model.parameters()])))
@@ -284,7 +296,9 @@ def main():
                 logging.info('Restoring NVIDIA AMP state from checkpoint')
             amp.load_state_dict(resume_state['amp'])
     del resume_state
+    
 
+    #model.apply(freeze_backbone)
     model_ema = None
     if args.model_ema:
         # Important to create EMA model after cuda(), DP wrapper, and AMP but before SyncBN and DDP wrapper
@@ -329,11 +343,16 @@ def main():
     if args.local_rank == 0:
         logging.info('Scheduled epochs: {}'.format(num_epochs))
 
-    train_anno_set = 'train2017'
+    '''train_anno_set = 'train2017'
     train_annotation_path = os.path.join(args.data, 'annotations', f'instances_{train_anno_set}.json')
     train_image_dir = train_anno_set
-    dataset_train = CocoDetection(os.path.join(args.data, train_image_dir), train_annotation_path)
+    dataset_train = CocoDetection(os.path.join(args.data, train_image_dir), train_annotation_path)'''
 
+    train_anno_set = 'Detrac_train_new'
+    train_annotation_path = os.path.join(args.data , 'annotations', 'Detrac_Annotations_Train_new')
+    train_image_dir = train_anno_set
+    dataset_train = Track_Dataset(os.path.join(args.data, train_image_dir), train_annotation_path)
+    
     # FIXME cutmix/mixup worth investigating?
     # collate_fn = None
     # if args.prefetcher and args.mixup > 0:
@@ -360,10 +379,10 @@ def main():
         pin_mem=args.pin_mem,
     )
 
-    train_anno_set = 'val2017'
-    train_annotation_path = os.path.join(args.data, 'annotations', f'instances_{train_anno_set}.json')
+    train_anno_set = 'Detrac_test_split'
+    train_annotation_path = os.path.join(args.data, 'annotations', 'Detrac_annotations_test_split')
     train_image_dir = train_anno_set
-    dataset_eval = CocoDetection(os.path.join(args.data, train_image_dir), train_annotation_path)
+    dataset_eval = Track_Dataset(os.path.join(args.data, train_image_dir), train_annotation_path)
 
     loader_eval = create_loader(
         dataset_eval,
@@ -538,7 +557,7 @@ def train_epoch(
     return OrderedDict([('loss', losses_m.avg)])
 
 
-def validate(model, loader, args, evaluator=None, log_suffix=''):
+'''def validate(model, loader, args, evaluator=None, log_suffix=''):
     batch_time_m = AverageMeter()
     losses_m = AverageMeter()
 
@@ -579,7 +598,7 @@ def validate(model, loader, args, evaluator=None, log_suffix=''):
     if evaluator is not None:
         metrics['map'] = evaluator.evaluate()
 
-    return metrics
+    return metrics'''
 
 
 if __name__ == '__main__':
