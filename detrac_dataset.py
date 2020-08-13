@@ -116,10 +116,23 @@ class Track_Dataset(data.Dataset):
     
     def __getitem__(self,index):
         """ returns item indexed from all frames in all tracks"""
-        cur = self.all_data[index]
-        im = Image.open(cur['image'])
+      cur = self.all_data[index]
+        #im = Image.open(cur['image']).convert('RGB')
+        #im = im.resize((512,512), Image.ANTIALIAS)
         label = cur['label']
-
+        #im = imread(cur['image'])
+        im = cv2.imread(str(cur['image'])) #should return images[j]
+        width = 512
+        height = 512
+        dim = (width, height)
+        im = cv2.resize(im, dim) #interpolation = cv2.INTER_AREA)
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        #im = torch.Tensor(im)
+        # __getitem__ sends to the batch in the form of lists, dicts, tensors, arrays, etc not Jpeg
+        '''if self.transform is not None:
+            transform= transforms.Compose([transforms.Resize((512,512)), transforms.ToTensor])
+            im, label = self.transform(im, label)'''
+        
         return im, label
     
     def parse_labels(self,label_file):
