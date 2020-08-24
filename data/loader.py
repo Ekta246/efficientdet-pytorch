@@ -39,14 +39,15 @@ def fast_collate(batch):
     tensor = torch.zeros((batch_size, *batch[0][0].shape), dtype=torch.uint8)
     for i in range(batch_size):
         tensor[i] += torch.from_numpy(batch[i][0])
-        for tk, tv in batch[i][1][0].items():
+        for t in batch[i][1]:
+            for tk, tv in t.items():
         #for tk, tv in batch[i][1].items():
-            if isinstance(tv, np.ndarray) and len(tv.shape):
-                target[tk][i, 0:tv.shape[0]] = torch.from_numpy(tv)
-            elif isinstance(tv, str):
-               target[tk]  = tv
-            else:
-                target[tk][i] = torch.tensor(tv, dtype=target[tk].dtype)
+                if isinstance(tv, np.ndarray) and len(tv.shape):
+                    target[tk][i, 0:tv.shape[0]] = torch.from_numpy(tv)
+                elif isinstance(tv, str):
+                    target[tk]  = tv
+                else:
+                    target[tk][i] = torch.tensor(tv, dtype=target[tk].dtype)
 
     return tensor, target
 
