@@ -11,12 +11,14 @@ Label dir is a directory containing a bunch of label files
 
 import os
 import numpy as np
-
+import torch
 import cv2
 from PIL import Image
 from torch.utils import data
 import xml.etree.ElementTree as ET
-
+import torch.utils.data as data
+from torchvision import transforms, utils
+from matplotlib.image import imread
 
 #from detrac_plot_utils import pil_to_cv, plot_bboxes_2d
 
@@ -25,26 +27,28 @@ class Track_Dataset(data.Dataset):
     Creates an object for referencing the UA-Detrac 2D object tracking dataset
     """
     
-    def __init__(self, image_dir, label_dir):
+    def __init__(self, image_dir, label_dir, transform=None):
+       # super(Track_Dataset, self).__init__()
         """ initializes object. By default, the first track (cur_track = 0) is loaded 
         such that next(object) will pull next frame from the first track"""
-
+       
         # stores files for each set of images and each label
         dir_list = next(os.walk(image_dir))[1]
-        print (len(dir_list))
         track_list = [os.path.join(image_dir,item) for item in dir_list]
-        label_list = [os.path.join(label_dir,item) for item in os.listdir(label_dir)]
+        label_list = [os.path.join(label_dir,item) for item in os.listdir(label_dir)] 
         track_list.sort()
         label_list.sort()
         
         self.track_offsets = [0]
         self.track_metadata = []
         self.all_data = []
-        
+        self.transform = transform
+        if self.transform:
+            transform= transforms.Compose([transforms.Resize((512,512)), transforms.ToTensor])
         # parse and store all labels and image names in a list such that
         # all_data[i] returns dict with image name, label and other stats
         # track_offsets[i] retuns index of first frame of track[i[]]
-        for i in range(0,len(track_list)):
+        for i in range(0,len(track_list)):#MVI_20011
             
             images = [os.path.join(track_list[i],frame) for frame in os.listdir(track_list[i])]
             images.sort() 
@@ -54,12 +58,13 @@ class Track_Dataset(data.Dataset):
             for j in range(len(images)):
                 out_dict = {
                         'image':images[j],
-                        'label':labels[j],
+                        'label':labels[j],         
                         'track_len': len(images),
                         'track_num': i,
                         'frame_num_of_track':j
                         }
                 self.all_data.append(out_dict)
+                
             
             # index of first frame
             if i < len(track_list) - 1:
@@ -116,24 +121,26 @@ class Track_Dataset(data.Dataset):
     
     def __getitem__(self,index):
         """ returns item indexed from all frames in all tracks"""
-      cur = self.all_data[index]
+        cur = self.all_data[index]
         #im = Image.open(cur['image']).convert('RGB')
         #im = im.resize((512,512), Image.ANTIALIAS)
         label = cur['label']
-        #im = imread(cur['image'])
-        im = cv2.imread(str(cur['image'])) #should return images[j]
+        im = imread(cur['image'])
+        #im = cv2.imread(str(cur['image'])) #should return images[j]
         width = 512
         height = 512
         dim = (width, height)
         im = cv2.resize(im, dim) #interpolation = cv2.INTER_AREA)
         im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        im= im.transpose(2,0,1)
+        sample = [im, label]
         #im = torch.Tensor(im)
         # __getitem__ sends to the batch in the form of lists, dicts, tensors, arrays, etc not Jpeg
         '''if self.transform is not None:
             transform= transforms.Compose([transforms.Resize((512,512)), transforms.ToTensor])
             im, label = self.transform(im, label)'''
         
-        return im, label
+        return sample
     
     def parse_labels(self,label_file):
         """
@@ -173,6 +180,23 @@ class Track_Dataset(data.Dataset):
                 data = boxid.getchildren()
                 coords = data[0].attrib
                 stats = data[1].attrib
+                for k,v in stats.items():
+                    if stats[k]=='Sedan':
+                        stats[k]=0
+                    elif stats[k]=='Taxi' :
+                        stats[k] = 1
+                    elif stats[k]=='Hatchback' :
+                        stats[k] = 2
+                    elif stats[k]=='Suv' :
+                        stats[k] = 3    
+                    elif stats[k] == 'Bus':
+                        stats[k] = 4
+                    elif stats[k] == 'Van' : #Sedan, Suv, Taxi, Hatchback, Truck-Util, Bus, Van
+                        stats[k] = 5
+                    elif stats[k]=='Truck-Util' :
+                        stats[k] = 6    
+                    else:
+                        stats[k] = 7
                 bbox = np.array([float(coords['left']),
                                 float(coords['top']),
                                 float(coords['left']) + float(coords['width']),
@@ -185,9 +209,8 @@ class Track_Dataset(data.Dataset):
                         #'truncation':float(stats['truncation_ratio']),
                         'bbox':bbox
                         }
-                
                 frame_boxes.append(det_dict)
-            all_boxes.append(frame_boxes)
+            all_boxes.append(frame_boxes)     #############into dict################
         
         sequence_metadata = {
                 'sequence':seq_name,
@@ -228,8 +251,8 @@ class Track_Dataset(data.Dataset):
 
 
 #### Test script here
-label_dir = "/home/ekta/AI_current/EfficientDet_pytorch/detrac/annotations/Detrac_annotations_test_split"
-image_dir = "/home/ekta/AI_current/EfficientDet_pytorch/detrac/Detrac_test_split"
+label_dir = "/home/ekta/AI_current/Effdet_for_frozen/Yet-Another-EfficientDet-Pytorch/detrac/annotations/Detrac_annotations_test_split"
+image_dir = "/home/ekta/AI_current/Effdet_for_frozen/Yet-Another-EfficientDet-Pytorch/detrac/detrac/Detrac_test_split"
 #test = Track_Dataset(image_dir,label_dir)
 #test.plot(1)
 
