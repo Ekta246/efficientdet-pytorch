@@ -202,15 +202,21 @@ class Track_Dataset(data.Dataset):
                                 float(coords['left']) + float(coords['width']),
                                 float(coords['top'])  + float(coords['height'])])
                 det_dict = {
-                        'id':int(boxid.attrib['id']),
                         'class':stats['vehicle_type'],
-                        #'color':stats['color'],
-                        #'orientation':float(stats['orientation']),
-                        #'truncation':float(stats['truncation_ratio']),
                         'bbox':bbox
                         }
                 frame_boxes.append(det_dict)
-            all_boxes.append(frame_boxes)     #############into dict################
+                merged_labels =[]
+                before_allboxes=[]
+                for dict_s in frame_boxes:
+                    d={}
+                    for elem in dict_s.keys():
+                        if elem=="bbox":
+                            d[elem]=np.concatenate(list(d[elem] for d in frame_boxes))
+                        if elem=="class":
+                            d[elem]=tuple(d[elem] for d in frame_boxes)
+                        merged_labels.append(d)
+            all_boxes.append(merged_labels)     #############into dict################
         
         sequence_metadata = {
                 'sequence':seq_name,
