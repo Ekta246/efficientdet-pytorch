@@ -206,17 +206,17 @@ class Track_Dataset(data.Dataset):
                         'bbox':bbox
                         }
                 frame_boxes.append(det_dict)
-                merged_labels =[]
                 before_allboxes=[]
+                d={}
                 for dict_s in frame_boxes:
-                    d={}
                     for elem in dict_s.keys():
                         if elem=="bbox":
-                            d[elem]=np.concatenate(list(d[elem] for d in frame_boxes))
+                            d[elem]=np.stack(list(d[elem] for d in frame_boxes))
                         if elem=="class":
                             d[elem]=tuple(d[elem] for d in frame_boxes)
-                        merged_labels.append(d)
-            all_boxes.append(merged_labels)     #############into dict################
+                before_allboxes.append(d)
+            all_boxes.append(before_allboxes)  
+                  
         
         sequence_metadata = {
                 'sequence':seq_name,
