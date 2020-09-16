@@ -27,13 +27,14 @@ except ImportError:
 
 from effdet import create_model, COCOEvaluator, unwrap_bench
 from data import create_loader, CocoDetection
-
+from torchvision import transforms, utils
 from timm.models import resume_checkpoint, load_checkpoint
 from timm.utils import *
 from timm.optim import create_optimizer
 from timm.scheduler import create_scheduler
 from Detrac.detrac_dataset import Track_Dataset
 from Detrac import *
+from vdot import VdotDataset
 torch.backends.cudnn.benchmark = True
 
 
@@ -55,7 +56,7 @@ def add_bool_arg(parser, name, default=False, help=''):  # FIXME move to utils
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 # Dataset / Model parameters
 parser.add_argument('data', metavar='DIR',
-                    help='path to dataset')
+                    help='path to dataset',default='home/ekta/AI_current/EfficientDet_pytorch/coco/coco')
 parser.add_argument('--model', default='tf_efficientdet_d1', type=str, metavar='MODEL',
                     help='Name of model to train (default: "countception"')
 add_bool_arg(parser, 'redundant-bias', default=None,
@@ -243,7 +244,7 @@ def main():
 
     def freeze_backbone(m):
             classname = m.__class__.__name__
-            for ntl in ['EfficientNet']:
+            for ntl in ['EfficientNetFeatures']:
                 if ntl in classname:
                     for param in m.parameters():
                         param.requires_grad = False
@@ -342,16 +343,20 @@ def main():
 
     if args.local_rank == 0:
         logging.info('Scheduled epochs: {}'.format(num_epochs))
-
+    
+    train_anno_set = 'revised_set' ###'images/Insight-MVT_Annotation_Test'  
+    train_annotation_path = os.path.join(args.data, 'train_annotations', 'annotations_revised.json') #test
+    train_image_dir = train_anno_set
+    dataset_train = VdotDataset(os.path.join(args.data, train_image_dir), train_annotation_path)
     '''train_anno_set = 'train2017'
     train_annotation_path = os.path.join(args.data, 'annotations', f'instances_{train_anno_set}.json')
     train_image_dir = train_anno_set
     dataset_train = CocoDetection(os.path.join(args.data, train_image_dir), train_annotation_path)'''
 
-    train_anno_set = 'Detrac_train_new'
-    train_annotation_path = os.path.join(args.data , 'annotations', 'Detrac_Annotations_Train_new')
+    '''train_anno_set = 'Detrac_train_new' ##'
+    train_annotation_path = os.path.join(args.data , 'annotations', 'Detrac_Annotations_Train_new') #train
     train_image_dir = train_anno_set
-    dataset_train = Track_Dataset(os.path.join(args.data, train_image_dir), train_annotation_path)
+    dataset_train = Track_Dataset(os.path.join(args.data, train_image_dir), train_annotation_path, transform=None)'''
     
     # FIXME cutmix/mixup worth investigating?
     # collate_fn = None
@@ -379,10 +384,21 @@ def main():
         pin_mem=args.pin_mem,
     )
 
-    train_anno_set = 'Detrac_test_split'
-    train_annotation_path = os.path.join(args.data, 'annotations', 'Detrac_annotations_test_split')
+    train_anno_set = 'revised_set' ###'images/Insight-MVT_Annotation_Test'  
+    train_annotation_path = os.path.join(args.data, 'train_annotations', 'annotations_revised.json') #test
     train_image_dir = train_anno_set
-    dataset_eval = Track_Dataset(os.path.join(args.data, train_image_dir), train_annotation_path)
+    dataset_eval = VdotDataset(os.path.join(args.data, train_image_dir), train_annotation_path)
+
+    '''train_anno_set = 'Detrac_test_split' ###'images/Insight-MVT_Annotation_Test'  
+    train_annotation_path = os.path.join(args.data, 'annotations', 'Detrac_annotations_test_split') #test
+    train_image_dir = train_anno_set
+    dataset_eval = Track_Dataset(os.path.join(args.data, train_image_dir), train_annotation_path, transform= None)'''
+
+    '''train_anno_set = 'val2017'
+    train_annotation_path = os.path.join(args.data, 'annotations', f'instances_{train_anno_set}.json')
+    train_image_dir = train_anno_set
+    dataset_eval = CocoDetection(os.path.join(args.data, train_image_dir), train_annotation_path)'''
+
 
     loader_eval = create_loader(
         dataset_eval,
@@ -398,7 +414,7 @@ def main():
         pin_mem=args.pin_mem,
     )
 
-    evaluator = COCOEvaluator(dataset_eval.coco, distributed=args.distributed)
+    #evaluator = COCOEvaluator(dataset_eval.coco, distributed=args.distributed)
 
     eval_metric = args.eval_metric
     best_metric = None
@@ -436,24 +452,24 @@ def main():
                 if args.distributed and args.dist_bn in ('broadcast', 'reduce'):
                     distribute_bn(model_ema, args.world_size, args.dist_bn == 'reduce')
 
-                eval_metrics = validate(model_ema.ema, loader_eval, args, evaluator, log_suffix=' (EMA)')
-            else:
-                eval_metrics = validate(model, loader_eval, args, evaluator)
+                #eval_metrics = validate(model_ema.ema, loader_eval, args, evaluator, log_suffix=' (EMA)')
+            #else:
+                #eval_metrics = validate(model, loader_eval, args, evaluator)
 
-            if lr_scheduler is not None:
+            if lr_scheduler is not None: #make lr_schedular None
                 # step LR for next epoch
                 lr_scheduler.step(epoch + 1, eval_metrics[eval_metric])
 
-            if saver is not None:
+            if saver is not None: 
                 update_summary(
                     epoch, train_metrics, eval_metrics, os.path.join(output_dir, 'summary.csv'),
                     write_header=best_metric is None)
 
                 # save proper checkpoint with eval metric
-                save_metric = eval_metrics[eval_metric]
+                #save_metric = eval_metrics[eval_metric]
                 best_metric, best_epoch = saver.save_checkpoint(
                     unwrap_bench(model), optimizer, args,
-                    epoch=epoch, model_ema=unwrap_bench(model_ema), metric=save_metric, use_amp=use_amp)
+                    epoch=epoch, model_ema=unwrap_bench(model_ema), metric=None, use_amp=use_amp) #checks the threshold for mAP
 
     except KeyboardInterrupt:
         pass
@@ -557,7 +573,7 @@ def train_epoch(
     return OrderedDict([('loss', losses_m.avg)])
 
 
-'''def validate(model, loader, args, evaluator=None, log_suffix=''):
+def validate(model, loader, args, evaluator=None, log_suffix=''):
     batch_time_m = AverageMeter()
     losses_m = AverageMeter()
 
@@ -598,7 +614,7 @@ def train_epoch(
     if evaluator is not None:
         metrics['map'] = evaluator.evaluate()
 
-    return metrics'''
+    return metrics
 
 
 if __name__ == '__main__':
