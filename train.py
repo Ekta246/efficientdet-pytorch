@@ -13,7 +13,7 @@ import argparse
 import time
 import yaml
 from datetime import datetime
-
+from tensorboardX import SummaryWriter
 import torch
 import torchvision.utils
 try:
@@ -32,7 +32,7 @@ from timm.models import resume_checkpoint, load_checkpoint
 from timm.utils import *
 from timm.optim import create_optimizer
 from timm.scheduler import create_scheduler
-from Detrac.detrac_dataset import Track_Dataset
+#from Detrac.detrac_dataset import Track_Dataset
 from Detrac import *
 from vdot import VdotDataset
 torch.backends.cudnn.benchmark = True
@@ -344,8 +344,8 @@ def main():
     if args.local_rank == 0:
         logging.info('Scheduled epochs: {}'.format(num_epochs))
     
-    train_anno_set = 'revised_set' ###'images/Insight-MVT_Annotation_Test'  
-    train_annotation_path = os.path.join(args.data, 'train_annotations', 'annotations_revised.json') #test
+    train_anno_set = 'train_set' ###'images/Insight-MVT_Annotation_Test'  
+    train_annotation_path = os.path.join(args.data, 'train_annotations', 'train_annotations.json') #test
     train_image_dir = train_anno_set
     dataset_train = VdotDataset(os.path.join(args.data, train_image_dir), train_annotation_path)
     '''train_anno_set = 'train2017'
@@ -384,8 +384,8 @@ def main():
         pin_mem=args.pin_mem,
     )
 
-    train_anno_set = 'revised_set' ###'images/Insight-MVT_Annotation_Test'  
-    train_annotation_path = os.path.join(args.data, 'train_annotations', 'annotations_revised.json') #test
+    train_anno_set = 'val_set' ###'images/Insight-MVT_Annotation_Test'  
+    train_annotation_path = os.path.join(args.data, 'val_annotations','val_annotations.json') #test
     train_image_dir = train_anno_set
     dataset_eval = VdotDataset(os.path.join(args.data, train_image_dir), train_annotation_path)
 
@@ -416,7 +416,7 @@ def main():
 
     #evaluator = COCOEvaluator(dataset_eval.coco, distributed=args.distributed)
 
-    eval_metric = args.eval_metric
+    '''eval_metric = args.eval_metric
     best_metric = None
     best_epoch = None
     saver = None
@@ -431,7 +431,7 @@ def main():
         decreasing = True if eval_metric == 'loss' else False
         saver = CheckpointSaver(checkpoint_dir=output_dir, decreasing=decreasing)
         with open(os.path.join(output_dir, 'args.yaml'), 'w') as f:
-            f.write(args_text)
+            f.write(args_text)'''
 
     try:
         for epoch in range(start_epoch, num_epochs):
@@ -439,8 +439,8 @@ def main():
                 loader_train.sampler.set_epoch(epoch)
 
             train_metrics = train_epoch(
-                epoch, model, loader_train, optimizer, args,
-                lr_scheduler=lr_scheduler, saver=saver, output_dir=output_dir, use_amp=use_amp, model_ema=model_ema)
+                epoch, model, loader_train, optimizer, args)
+                #lr_scheduler=lr_scheduler, saver=saver, output_dir=output_dir, use_amp=use_amp, model_ema=model_ema)
 
             if args.distributed and args.dist_bn in ('broadcast', 'reduce'):
                 if args.local_rank == 0:
@@ -456,7 +456,7 @@ def main():
             #else:
                 #eval_metrics = validate(model, loader_eval, args, evaluator)
 
-            if lr_scheduler is not None: #make lr_schedular None
+            '''if lr_scheduler is not None: #make lr_schedular None
                 # step LR for next epoch
                 lr_scheduler.step(epoch + 1, eval_metrics[eval_metric])
 
@@ -469,17 +469,17 @@ def main():
                 #save_metric = eval_metrics[eval_metric]
                 best_metric, best_epoch = saver.save_checkpoint(
                     unwrap_bench(model), optimizer, args,
-                    epoch=epoch, model_ema=unwrap_bench(model_ema), metric=None, use_amp=use_amp) #checks the threshold for mAP
+                    epoch=epoch, model_ema=unwrap_bench(model_ema), metric=None, use_amp=use_amp) #checks the threshold for mAP'''
 
     except KeyboardInterrupt:
         pass
-    if best_metric is not None:
-        logging.info('*** Best metric: {0} (epoch {1})'.format(best_metric, best_epoch))
+    '''if best_metric is not None:
+        logging.info('*** Best metric: {0} (epoch {1})'.format(best_metric, best_epoch))'''
 
 
 def train_epoch(
-        epoch, model, loader, optimizer, args,
-        lr_scheduler=None, saver=None, output_dir='', use_amp=False, model_ema=None):
+        epoch, model, loader, optimizer, args):
+        #lr_scheduler=None, saver=None, output_dir='', use_amp=False, model_ema=None):
 
     if args.prefetcher and args.mixup > 0 and loader.mixup_enabled:
         if args.mixup_off_epoch and epoch >= args.mixup_off_epoch:
@@ -505,21 +505,21 @@ def train_epoch(
             losses_m.update(loss.item(), input.size(0))
 
         optimizer.zero_grad()
-        if use_amp:
+        '''if use_amp:
             with amp.scale_loss(loss, optimizer) as scaled_loss:
                 scaled_loss.backward()
             if args.clip_grad:
                 torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.clip_grad)
-        else:
-            loss.backward()
-            if args.clip_grad:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad)
+        else:'''
+        loss.backward()
+        if args.clip_grad:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad)
         optimizer.step()
 
         torch.cuda.synchronize()
-        if model_ema is not None:
+        '''if model_ema is not None:
             model_ema.update(model)
-        num_updates += 1
+        num_updates += 1'''
 
         batch_time_m.update(time.time() - end)
         if last_batch or batch_idx % args.log_interval == 0:
@@ -536,7 +536,7 @@ def train_epoch(
                     'Loss: {loss.val:>9.6f} ({loss.avg:>6.4f})  '
                     'Time: {batch_time.val:.3f}s, {rate:>7.2f}/s  '
                     '({batch_time.avg:.3f}s, {rate_avg:>7.2f}/s)  '
-                    'LR: {lr:.3e}  '
+                    'LR: {lr:.1e}  '
                     'Data: {data_time.val:.3f} ({data_time.avg:.3f})'.format(
                         epoch,
                         batch_idx, len(loader),
@@ -555,14 +555,14 @@ def train_epoch(
                         padding=0,
                         normalize=True)
 
-        if saver is not None and args.recovery_interval and (
+        '''if saver is not None and args.recovery_interval and (
                 last_batch or (batch_idx + 1) % args.recovery_interval == 0):
             saver.save_recovery(
                 unwrap_bench(model), optimizer, args, epoch, model_ema=unwrap_bench(model_ema),
                 use_amp=use_amp, batch_idx=batch_idx)
 
         if lr_scheduler is not None:
-            lr_scheduler.step_update(num_updates=num_updates, metric=losses_m.avg)
+            lr_scheduler.step_update(num_updates=num_updates, metric=losses_m.avg)'''
 
         end = time.time()
         # end for
@@ -573,7 +573,7 @@ def train_epoch(
     return OrderedDict([('loss', losses_m.avg)])
 
 
-def validate(model, loader, args, evaluator=None, log_suffix=''):
+'''def validate(model, loader, args, evaluator=None, log_suffix=''):
     batch_time_m = AverageMeter()
     losses_m = AverageMeter()
 
@@ -614,7 +614,7 @@ def validate(model, loader, args, evaluator=None, log_suffix=''):
     if evaluator is not None:
         metrics['map'] = evaluator.evaluate()
 
-    return metrics
+    return metrics'''
 
 
 if __name__ == '__main__':
