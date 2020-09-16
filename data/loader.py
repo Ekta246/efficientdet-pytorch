@@ -3,7 +3,6 @@
 Hacked together by Ross Wightman
 """
 import torch.utils.data
-
 from .transforms import *
 from timm.data.distributed_sampler import OrderedDistributedSampler
 
@@ -16,16 +15,13 @@ def fast_collate(batch):
 
     # FIXME this needs to be more robust
     target = dict()
-     
-    for k,v in batch[0][1][0].items():
-    #for k,v in batch[0][1].items(): 
+    for k, v in batch[0][1].items():
         if isinstance(v, np.ndarray):
             # if a numpy array, assume it relates to object instances, pad to MAX_NUM_INSTANCES
             target_shape = (batch_size, MAX_NUM_INSTANCES)
-            #print(target_shape)
-            if len(v.shape) >= 1:
-                target_shape = target_shape + v.shape[0:]
-                target_dtype = torch.float32
+            if len(v.shape) > 1:
+                target_shape = target_shape + v.shape[1:]
+            target_dtype = torch.float32
         elif isinstance(v, (tuple, list)):
             # if tuple or list, assume per batch
             target_shape = (batch_size, len(v))
@@ -39,15 +35,11 @@ def fast_collate(batch):
     tensor = torch.zeros((batch_size, *batch[0][0].shape), dtype=torch.uint8)
     for i in range(batch_size):
         tensor[i] += torch.from_numpy(batch[i][0])
-        for t in batch[i][1]:
-            for tk, tv in t.items():
-        #for tk, tv in batch[i][1].items():
-                if isinstance(tv, np.ndarray) and len(tv.shape):
-                    target[tk][i, 0:tv.shape[0]] = torch.from_numpy(tv)
-                elif isinstance(tv, str):
-                    target[tk]  = tv
-                else:
-                    target[tk][i] = torch.tensor(tv, dtype=target[tk].dtype)
+        for tk, tv in batch[i][1].items():
+            if isinstance(tv, np.ndarray) and len(tv.shape):
+                target[tk][i, 0:tv.shape[0]] = torch.from_numpy(tv)
+            else:
+                target[tk][i] = torch.tensor(tv, dtype=target[tk].dtype)
 
     return tensor, target
 
@@ -71,7 +63,7 @@ class PrefetchLoader:
                 next_input = next_input.cuda(non_blocking=True)
                 next_input = next_input.float().sub_(self.mean).div_(self.std)
                 next_target = {k: v.cuda(non_blocking=True) for k, v in next_target.items()}
-                
+
             if not first:
                 yield input, target
             else:
@@ -146,9 +138,10 @@ def create_loader(
         sampler=sampler,
         pin_memory=pin_mem,
         collate_fn=fast_collate if use_prefetcher else torch.utils.data.dataloader.default_collate,
-        #collate_fn=torch.utils.data._utils.collate.default_collate
     )
     if use_prefetcher:
         loader = PrefetchLoader(loader, mean=mean, std=std)
 
     return loader
+
+
