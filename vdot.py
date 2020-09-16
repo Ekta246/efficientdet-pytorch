@@ -7,15 +7,17 @@ from PIL import Image
 from torch.utils import data
 from matplotlib.image import imread
 class VdotDataset(data.Dataset):
-    def __init__(self, image_dir, data_json):
+    def __init__(self, image_dir, ann_file):
 
         
         self.image_dir=image_dir
-        ann = open('/home/ekta/AI_current/vdot/vdot/train_annotations/annotations_revised.json', 'r')
-        self.ann = ann
+        self.ann_file = ann_file
+        #ann = open('/home/ekta/AI_current/vdot/vdot/train_annotations/train_annotations.json', 'r')
+        ann = open(self.ann_file)
         data_json = json.load(ann)
         self.data_json = data_json
-        image_dir = os.listdir('/home/ekta/AI_current/vdot/vdot/revised_set')
+        #image_dir = os.listdir('/home/ekta/AI_current/vdot/vdot/train_set')
+        image_dir=os.listdir(self.image_dir)
         total_num_images = len(image_dir)
         self.total_num_images = total_num_images
         self.imgs_list, self.annot_list = self.parse_labels(self.data_json)
@@ -64,7 +66,8 @@ class VdotDataset(data.Dataset):
         #img= Image.open(os.path.join('/home/ekta/AI_current/vdot/vdot/revised_set', self.image_name))
         labels = self.annot_list[index]
         #labels = np.array([labels])
-        img = imread(os.path.join('/home/ekta/AI_current/vdot/vdot/revised_set', self.image_name))
+        #img = imread(os.path.join('/home/ekta/AI_current/vdot/vdot/train_set', self.image_name))
+        img = imread(os.path.join(self.image_dir, self.image_name))
         width = 512
         height = 512
         dim = (width, height)
