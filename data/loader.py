@@ -34,6 +34,7 @@ def fast_collate(batch):
 
     tensor = torch.zeros((batch_size, *batch[0][0].shape), dtype=torch.uint8)
     for i in range(batch_size):
+        
         tensor[i] += torch.from_numpy(batch[i][0])
         for tk, tv in batch[i][1].items():
             if isinstance(tv, np.ndarray) and len(tv.shape):
@@ -93,7 +94,7 @@ def create_loader(
         fill_color='mean',
         mean=IMAGENET_DEFAULT_MEAN,
         std=IMAGENET_DEFAULT_STD,
-        num_workers=1,
+        num_workers=0,
         distributed=False,
         pin_mem=False,
 ):
@@ -133,7 +134,7 @@ def create_loader(
     loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=False,
+        shuffle=True if is_training else False,
         num_workers=num_workers,
         sampler=sampler,
         pin_memory=pin_mem,
