@@ -10,9 +10,9 @@ from matplotlib.image import imread
 from pycocotools.coco import COCO
 from effdet.data.parsers import create_parser
 class VdotDataset(data.Dataset):
-    def __init__(self, image_dir,  ann_file, parser=None, parser_kwargs=None, transform=None):
+    def __init__(self, image_dir,  ann_file,  transform=None):
         super(VdotDataset, self).__init__
-        parser_kwargs=parser_kwargs or {}
+        
         self.transform = transform
         self.image_dir=image_dir
         self.ann_file = ann_file
@@ -20,30 +20,16 @@ class VdotDataset(data.Dataset):
         #ann = open('/home/ekta/AI_current/vdot/vdot/train_annotations/train_annotations.json', 'r')
         ann = open(self.ann_file)
         data_json = json.load(ann)
+        self.yxyx = True  
         self.data_json = data_json
         #image_dir = os.listdir('/home/ekta/AI_current/vdot/vdot/train_set')
         image_dir=os.listdir(self.image_dir)
         total_num_images = len(image_dir)
         self.total_num_images = total_num_images
         self.imgs_list, self.annot_list = self.parse_labels(self.data_json)
-        #self.for_size = for_size
-       # self.for_size = self.img_info(self.image_dir)
-        #self.imgs_list = []
-        #self.annot_list= []
-        self._parser = parser
+        
         self._transform = transform
-        self.cat_dicts = [{'id': 1, 'name': 'inlet'}]
-    '''def parse_images(self, image_dir, ann_file):
-
-        for item in data_json.values():
-            if item['filename'] in image_dir:
-                img = Image.open(os.path.join('/home/ekta/AI_current/vdot/vdot/train_set', item['filename']))
-                for i in item['assets']:
-                    if i == 'storm_drain':
-                        annot_list.append(i.values() & i['drop_inlet'])
-                    else:
-                        annot_list.append(i['storm_drain'])
-        return img, annot_list '''
+        self.cat_dicts = [{'id': 1, 'name': 'storm_drain', 'id':2, 'name': 'drop_inlet'}]
 
     def parse_labels(self, ann_file):
 
@@ -69,18 +55,33 @@ class VdotDataset(data.Dataset):
         for i in range(len(cls)):
             for j,l in cls[i].items():
                 bbox=l
-                if j=='storm_drain':
-                    clss=1
+                #yxyx
+                [ymin, xmin, ymax, xmax]= [bbox[1], bbox[0], bbox[3], bbox[2]]
+                #xyxy
+                #[xmin, ymin, xmax, ymax]= [bbox[0], bbox[1], bbox[2], bbox[3]]
+                # the model requires in yxyx
+                bbox=[ymin, xmin, ymax, xmax]
+                #bbox=[xmin,ymin,xmax,ymax]
+                #if j=='storm_drain':
+                    #clss=1
                     #bbox=np.array([v], dtype=np.float32)
-                else:
-                    clss=2
+                if j=='drop_inlet':
+                    clss=1
                     #bbox=np.array([v], dtype=np.int64)
                 bboxes.append(bbox)
                 classes.append(clss)
             det_dict = {'bbox' :np.array(bboxes, dtype=np.float32), 'cls':np.array(classes, dtype=np.int64) , 'img_size': (800, 600)}
             bboxes = []
             classes = []
-            frame_boxes.append(det_dict) 
+            frame_boxes.append(det_dict)
+        '''for i in self.data_json.values():
+            if i['filename'] in self.image_dir:
+                filename_labels.append(i['filename'])
+                bboxes= i['assets']['drop_inlet']
+                [ymin, xmin, ymax, xmax]= [bboxes[1], bboxes[0], bboxes[3], bboxes[2]]
+                bboxes=[ymin, xmin, ymax, xmax]
+                det_dict = {'bbox' :np.array(bboxes, dtype=np.float32), 'cls':np.array([1], dtype=np.int64) , 'img_size': (800, 600)}
+            frame_boxes.append(det_dict)'''  
         return filename_labels, frame_boxes
 
     
@@ -108,26 +109,6 @@ class VdotDataset(data.Dataset):
             
         return img, labels
         
-
-    @property
-    def parser(self):
-        return self._parser
-
-    @property
-    def transform(self):
-        return self._transform
-
-    @transform.setter
-    def transform(self, t):
-        self._transform = t
-
-
-
-    '''def img_info(self, image_dir):
-        #os.listdir(self.image_dir)[1]
-        img =Image.open(os.listdir(self.image_dir)[1]).convert('RGB')
-        imge = img.size
-        return imge'''
         
 
 # self.img_info(self.image_dir)
