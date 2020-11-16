@@ -7,7 +7,7 @@ from .transforms import *
 from timm.data.distributed_sampler import OrderedDistributedSampler
 
 
-MAX_NUM_INSTANCES = 100
+MAX_NUM_INSTANCES = 1
 
 
 def fast_collate(batch):
