@@ -13,8 +13,9 @@ import argparse
 import time
 import yaml
 from datetime import datetime
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 import torch
+import json
 import torchvision.utils
 try:
     from apex import amp
@@ -24,20 +25,20 @@ try:
 except ImportError:
     from torch.nn.parallel import DistributedDataParallel as DDP
     has_apex = False
-
-from effdet import create_model, COCOEvaluator, unwrap_bench
+import matplotlib.pyplot as plt
+from effdet import create_model, CocoEvaluator, unwrap_bench
 from data import create_loader, CocoDetection
 from torchvision import transforms, utils
 from timm.models import resume_checkpoint, load_checkpoint
 from timm.utils import *
 from timm.optim import create_optimizer
 from timm.scheduler import create_scheduler
-#from Detrac.detrac_dataset import Track_Dataset
-from Detrac import *
+#from detrac_dataset import Track_Dataset
+#from Detrac import *
 from vdot import VdotDataset
 torch.backends.cudnn.benchmark = True
-
-
+from effdet.evaluator import CocoEvaluator, PascalEvaluator
+from effdet.evaluation.np_box_list imo
 # The first arg parser parses out only the --config argument, this argument is used to
 # load a yaml file containing key-values that override the defaults for the main parser below
 config_parser = parser = argparse.ArgumentParser(description='Training Config', add_help=False)
@@ -62,7 +63,7 @@ parser.add_argument('--model', default='tf_efficientdet_d1', type=str, metavar='
 add_bool_arg(parser, 'redundant-bias', default=None,
                     help='override model config for redundant bias')
 parser.set_defaults(redundant_bias=None)
-parser.add_argument('--pretrained', action='store_true', default=False,
+parser.add_argument('--pretrained', action='store_true', default=True,
                     help='Start with pretrained version of specified network (if avail)')
 parser.add_argument('--no-pretrained-backbone', action='store_true', default=False,
                     help='Do not start with pretrained backbone weights, fully random.')
@@ -70,6 +71,8 @@ parser.add_argument('--initial-checkpoint', default='', type=str, metavar='PATH'
                     help='Initialize model from this checkpoint (default: none)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='Resume full model and optimizer state from checkpoint (default: none)')
+parser.add_argument('--num-classes', type=int, default=2, metavar='N',
+                    help='Override num_classes in model config if set. For fine-tuning from pretrained.')
 parser.add_argument('--no-resume-opt', action='store_true', default=False,
                     help='prevent resume of optimizer state when resuming model')
 parser.add_argument('--mean', type=float, nargs='+', default=None, metavar='MEAN',
@@ -84,7 +87,7 @@ parser.add_argument('-b', '--batch-size', type=int, default=32, metavar='N',
                     help='input batch size for training (default: 32)')
 parser.add_argument('-vb', '--validation-batch-size-multiplier', type=int, default=1, metavar='N',
                     help='ratio of validation batch size to training batch size (default: 1)')
-parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
+parser.add_argument('--drop', type=float, default=0.1, metavar='PCT',
                     help='Dropout rate (default: 0.)')
 parser.add_argument('--drop-connect', type=float, default=None, metavar='PCT',
                     help='Drop connect rate, DEPRECATED, use drop-path (default: None)')
@@ -120,11 +123,13 @@ parser.add_argument('--lr-cycle-mul', type=float, default=1.0, metavar='MULT',
                     help='learning rate cycle len multiplier (default: 1.0)')
 parser.add_argument('--lr-cycle-limit', type=int, default=1, metavar='N',
                     help='learning rate cycle limit')
-parser.add_argument('--warmup-lr', type=float, default=0.0001, metavar='LR',
+parser.add_argument('--warmup-lr', type=float, default=0.000001, metavar='LR',
                     help='warmup learning rate (default: 0.0001)')
-parser.add_argument('--min-lr', type=float, default=1e-5, metavar='LR',
+parser.add_argument('--min-lr', type=float, default=1e-6, metavar='LR',
                     help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
 parser.add_argument('--epochs', type=int, default=300, metavar='N',
+                    help='number of epochs to train (default: 2)')
+parser.add_argument('--num_epoch', type=int, default=230, metavar='N',
                     help='number of epochs to train (default: 2)')
 parser.add_argument('--start-epoch', default=None, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -132,7 +137,7 @@ parser.add_argument('--decay-epochs', type=float, default=30, metavar='N',
                     help='epoch interval to decay LR')
 parser.add_argument('--warmup-epochs', type=int, default=5, metavar='N',
                     help='epochs to warmup LR, if scheduler supports')
-parser.add_argument('--cooldown-epochs', type=int, default=10, metavar='N',
+parser.add_argument('--cooldown-epochs', type=int, default=5, metavar='N',
                     help='epochs to cooldown LR at min_lr, after cyclic schedule ends')
 parser.add_argument('--patience-epochs', type=int, default=10, metavar='N',
                     help='patience epochs for Plateau LR scheduler (default: 10')
@@ -178,7 +183,7 @@ parser.add_argument('--log-interval', type=int, default=50, metavar='N',
                     help='how many batches to wait before logging training status')
 parser.add_argument('--recovery-interval', type=int, default=0, metavar='N',
                     help='how many batches to wait before writing recovery checkpoint')
-parser.add_argument('-j', '--workers', type=int, default=4, metavar='N',
+parser.add_argument('-j', '--workers', type=int, default=0, metavar='N',
                     help='how many training processes to use (default: 1)')
 parser.add_argument('--save-images', action='store_true', default=False,
                     help='save images of input bathes every log interval for debugging')
@@ -188,6 +193,8 @@ parser.add_argument('--pin-mem', action='store_true', default=False,
                     help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
 parser.add_argument('--no-prefetcher', action='store_true', default=False,
                     help='disable fast prefetcher')
+add_bool_arg(parser, 'loader-labeler', default=False,
+             help='label targets in loader, reduces GPU load somewhat')
 parser.add_argument('--output', default='', type=str, metavar='PATH',
                     help='path to output folder (default: none, current dir)')
 parser.add_argument('--eval-metric', default='map', type=str, metavar='EVAL_METRIC',
@@ -196,6 +203,7 @@ parser.add_argument('--tta', type=int, default=0, metavar='N',
                     help='Test/inference time augmentation (oversampling) factor. 0=None (default: 0)')
 parser.add_argument("--local_rank", default=0, type=int)
 
+parser.add_argument("--checkpoint_path_saved", default="./vdot_saved_pretrained.pth", type=str)
 
 def _parse_args():
     # Do we have a config file to parse?
@@ -242,20 +250,17 @@ def main():
 
     torch.manual_seed(args.seed + args.rank)
 
-    def freeze_backbone(m):
-            classname = m.__class__.__name__
-            for ntl in ['EfficientNetFeatures']:
-                if ntl in classname:
-                    for param in m.parameters():
-                        param.requires_grad = False
+    
     
     
     model = create_model(
         args.model,
         bench_task='train',
+        num_classes = args.num_classes,
         pretrained=args.pretrained,
         pretrained_backbone= args.pretrained_backbone,
         redundant_bias=args.redundant_bias,
+        no_labeler=False,
         checkpoint_path=args.initial_checkpoint,
     )
     # FIXME decide which args to keep and overlay on config / pass to backbone
@@ -264,10 +269,17 @@ def main():
     #     drop_path_rate=args.drop_path,
     #     drop_block_rate=args.drop_block,
     input_size = model.config.image_size
+    def freeze_backbone(m):
+            classname = m.__class__.__name__
+            for ntl in ['EfficientNet','BiFpn']:
+                if ntl in classname:
+                    for param in m.parameters():
+                        param.requires_grad = False
 
-    model.apply(freeze_backbone)
-    print('[Info] freezed backbone')
+    #model.apply(freeze_backbone)
+    #print('[Info] freezed backbone')
     
+    #model.freezeFPN()
     if args.local_rank == 0:
         logging.info('Model %s created, param count: %d' %
                      (args.model, sum([m.numel() for m in model.parameters()])))
@@ -298,7 +310,6 @@ def main():
             amp.load_state_dict(resume_state['amp'])
     del resume_state
     
-
     #model.apply(freeze_backbone)
     model_ema = None
     if args.model_ema:
@@ -344,14 +355,11 @@ def main():
     if args.local_rank == 0:
         logging.info('Scheduled epochs: {}'.format(num_epochs))
     
-    train_anno_set = 'train_set' ###'images/Insight-MVT_Annotation_Test'  
-    train_annotation_path = os.path.join(args.data, 'train_annotations', 'train_annotations.json') #test
+    train_anno_set = 'Just_400/augmentations/merged_augmentations' ###'images/Insight-MVT_Annotation_Test'  
+    train_annotation_path = os.path.join(args.data, 'Just_400/augmentations/annotations/','merged.json') #test
     train_image_dir = train_anno_set
     dataset_train = VdotDataset(os.path.join(args.data, train_image_dir), train_annotation_path)
-    '''train_anno_set = 'train2017'
-    train_annotation_path = os.path.join(args.data, 'annotations', f'instances_{train_anno_set}.json')
-    train_image_dir = train_anno_set
-    dataset_train = CocoDetection(os.path.join(args.data, train_image_dir), train_annotation_path)'''
+    
 
     '''train_anno_set = 'Detrac_train_new' ##'
     train_annotation_path = os.path.join(args.data , 'annotations', 'Detrac_Annotations_Train_new') #train
@@ -384,8 +392,8 @@ def main():
         pin_mem=args.pin_mem,
     )
 
-    train_anno_set = 'val_set' ###'images/Insight-MVT_Annotation_Test'  
-    train_annotation_path = os.path.join(args.data, 'val_annotations','val_annotations.json') #test
+    train_anno_set = 'Just_400/val_set' ###'images/Insight-MVT_Annotation_Test'  
+    train_annotation_path = os.path.join(args.data, 'Just_400/val_annotations','val_annotations.json') #test
     train_image_dir = train_anno_set
     dataset_eval = VdotDataset(os.path.join(args.data, train_image_dir), train_annotation_path)
 
@@ -394,10 +402,6 @@ def main():
     train_image_dir = train_anno_set
     dataset_eval = Track_Dataset(os.path.join(args.data, train_image_dir), train_annotation_path, transform= None)'''
 
-    '''train_anno_set = 'val2017'
-    train_annotation_path = os.path.join(args.data, 'annotations', f'instances_{train_anno_set}.json')
-    train_image_dir = train_anno_set
-    dataset_eval = CocoDetection(os.path.join(args.data, train_image_dir), train_annotation_path)'''
 
 
     loader_eval = create_loader(
@@ -414,16 +418,17 @@ def main():
         pin_mem=args.pin_mem,
     )
 
-    #evaluator = COCOEvaluator(dataset_eval.coco, distributed=args.distributed)
-
-    '''eval_metric = args.eval_metric
+    evaluator = PascalEvaluator(dataset_eval, distributed=False, pred_yxyx=False)
+    eval_metric = args.eval_metric
     best_metric = None
     best_epoch = None
     saver = None
     output_dir = ''
     if args.local_rank == 0:
         output_base = args.output if args.output else './output'
-        exp_name = '-'.join([
+        exp_name = '-'.join([#losses.append(losses_m.avg)
+                #print(losses)
+                #plt.plot(losses)
             datetime.now().strftime("%Y%m%d-%H%M%S"),
             args.model
         ])
@@ -431,7 +436,7 @@ def main():
         decreasing = True if eval_metric == 'loss' else False
         saver = CheckpointSaver(checkpoint_dir=output_dir, decreasing=decreasing)
         with open(os.path.join(output_dir, 'args.yaml'), 'w') as f:
-            f.write(args_text)'''
+            f.write(args_text)
 
     try:
         for epoch in range(start_epoch, num_epochs):
@@ -439,8 +444,8 @@ def main():
                 loader_train.sampler.set_epoch(epoch)
 
             train_metrics = train_epoch(
-                epoch, model, loader_train, optimizer, args)
-                #lr_scheduler=lr_scheduler, saver=saver, output_dir=output_dir, use_amp=use_amp, model_ema=model_ema)
+                epoch, model, loader_train, optimizer, args, output_dir='/home/ekta/AI_current/vdot/vdot',
+                lr_scheduler=lr_scheduler) #saver=saver, output_dir=output_dir, use_amp=use_amp, model_ema=model_ema)
 
             if args.distributed and args.dist_bn in ('broadcast', 'reduce'):
                 if args.local_rank == 0:
@@ -452,15 +457,15 @@ def main():
                 if args.distributed and args.dist_bn in ('broadcast', 'reduce'):
                     distribute_bn(model_ema, args.world_size, args.dist_bn == 'reduce')
 
-                #eval_metrics = validate(model_ema.ema, loader_eval, args, evaluator, log_suffix=' (EMA)')
-            #else:
-                #eval_metrics = validate(model, loader_eval, args, evaluator)
+                eval_metrics = validate(model_ema.ema, loader_eval, args, evaluator, log_suffix=' (EMA)')
+            else:
+                eval_metrics = validate(model, loader_eval, args, evaluator)
 
-            '''if lr_scheduler is not None: #make lr_schedular None
+            if lr_scheduler is not None: #make lr_schedular None
                 # step LR for next epoch
                 lr_scheduler.step(epoch + 1, eval_metrics[eval_metric])
 
-            if saver is not None: 
+            '''if saver is not None: 
                 update_summary(
                     epoch, train_metrics, eval_metrics, os.path.join(output_dir, 'summary.csv'),
                     write_header=best_metric is None)
@@ -473,13 +478,21 @@ def main():
 
     except KeyboardInterrupt:
         pass
-    '''if best_metric is not None:
-        logging.info('*** Best metric: {0} (epoch {1})'.format(best_metric, best_epoch))'''
+    if best_metric is not None:
+        logging.info('*** Best metric: {0} (epoch {1})'.format(best_metric, best_epoch))
+    output_dir = './op_dir'
 
+def save_checkpoint(state, filename='./vdot_saved_pretrained_frozen.pth'):
+        print("=> Saving checkpoint")
+        #model.eval()
+        torch.save(state,filename)
 
+'''def load_checkpoint(checkpoint):
+    model.load_state_dict(checkpoint['state_dict']) '''  
+loss_graph=[]     
 def train_epoch(
-        epoch, model, loader, optimizer, args):
-        #lr_scheduler=None, saver=None, output_dir='', use_amp=False, model_ema=None):
+        epoch, model, loader, optimizer, args,
+        lr_scheduler=None, saver=None, output_dir='./op_dir', use_amp=False, model_ema=None):
 
     if args.prefetcher and args.mixup > 0 and loader.mixup_enabled:
         if args.mixup_off_epoch and epoch >= args.mixup_off_epoch:
@@ -488,12 +501,18 @@ def train_epoch(
     batch_time_m = AverageMeter()
     data_time_m = AverageMeter()
     losses_m = AverageMeter()
-
+    if epoch == args.num_epoch:
+        checkpoint = {'state_dict': model.model.state_dict(), 'optimizer': optimizer.state_dict()}
+        save_checkpoint(checkpoint['state_dict'])
     model.train()
 
     end = time.time()
     last_idx = len(loader) - 1
+    #print(last_idx)
     num_updates = epoch * len(loader)
+
+    
+        #save(path)
     for batch_idx, (input, target) in enumerate(loader):
         last_batch = batch_idx == last_idx
         data_time_m.update(time.time() - end)
@@ -505,21 +524,21 @@ def train_epoch(
             losses_m.update(loss.item(), input.size(0))
 
         optimizer.zero_grad()
-        '''if use_amp:
+        if use_amp:
             with amp.scale_loss(loss, optimizer) as scaled_loss:
                 scaled_loss.backward()
             if args.clip_grad:
                 torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.clip_grad)
-        else:'''
-        loss.backward()
-        if args.clip_grad:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad)
+        else:
+            loss.backward()
+            if args.clip_grad:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad)
         optimizer.step()
 
         torch.cuda.synchronize()
-        '''if model_ema is not None:
+        if model_ema is not None:
             model_ema.update(model)
-        num_updates += 1'''
+        num_updates += 1
 
         batch_time_m.update(time.time() - end)
         if last_batch or batch_idx % args.log_interval == 0:
@@ -536,7 +555,7 @@ def train_epoch(
                     'Loss: {loss.val:>9.6f} ({loss.avg:>6.4f})  '
                     'Time: {batch_time.val:.3f}s, {rate:>7.2f}/s  '
                     '({batch_time.avg:.3f}s, {rate_avg:>7.2f}/s)  '
-                    'LR: {lr:.1e}  '
+                    'LR: {lr:.3e}  '
                     'Data: {data_time.val:.3f} ({data_time.avg:.3f})'.format(
                         epoch,
                         batch_idx, len(loader),
@@ -555,14 +574,13 @@ def train_epoch(
                         padding=0,
                         normalize=True)
 
-        '''if saver is not None and args.recovery_interval and (
-                last_batch or (batch_idx + 1) % args.recovery_interval == 0):
+        if saver is not None and args.recovery_interval and ( last_batch or (batch_idx + 1) % args.recovery_interval == 0):
             saver.save_recovery(
                 unwrap_bench(model), optimizer, args, epoch, model_ema=unwrap_bench(model_ema),
                 use_amp=use_amp, batch_idx=batch_idx)
 
         if lr_scheduler is not None:
-            lr_scheduler.step_update(num_updates=num_updates, metric=losses_m.avg)'''
+            lr_scheduler.step_update(num_updates=num_updates, metric=losses_m.avg)
 
         end = time.time()
         # end for
@@ -572,25 +590,47 @@ def train_epoch(
 
     return OrderedDict([('loss', losses_m.avg)])
 
-
-'''def validate(model, loader, args, evaluator=None, log_suffix=''):
+add_detections1=[]
+add_detections2=[]
+add_detections3=[]
+targetsbboxes1=[]
+targetsbboxes2=[]
+def validate(model, loader, args, evaluator=None, log_suffix=''):
     batch_time_m = AverageMeter()
     losses_m = AverageMeter()
 
     model.eval()
-
     end = time.time()
     last_idx = len(loader) - 1
     with torch.no_grad():
         for batch_idx, (input, target) in enumerate(loader):
             last_batch = batch_idx == last_idx
-
+            #print(last_batch)
             output = model(input, target)
             loss = output['loss']
-
+            visualizations={} #for debugging visulaizing predictions
+            img_num=0
+            i=0
             if evaluator is not None:
                 evaluator.add_predictions(output['detections'], target)
-
+            '''add_detections1.append(output['detections'][1][0][:4])
+            targetsbboxes1.append(target['bbox'][1][0])
+            with open('./predictions_val1.txt', 'w') as f:
+                for item in add_detections1:
+                    f.write("%s\n" % item)
+                for j in targetsbboxes1:
+                    f.write("The target is : %s\n" %j)
+            add_detections2.append(output['detections'][2][0][:4])
+            targetsbboxes2.append(target['bbox'][2][0])
+            with open('./predictions_val2.txt', 'w') as f:
+                for item in add_detections2:
+                    f.write("%s\n" % item)
+                for j in targetsbboxes2:
+                    f.write("The target2 is : %s\n" %j)
+            add_detections3.append(output['detections'][3][0][:4])
+            with open('./predictions_val3.txt', 'w') as f:
+                for item in add_detections3:
+                    f.write("%s\n" % item)'''
             if args.distributed:
                 reduced_loss = reduce_tensor(loss.data, args.world_size)
             else:
@@ -614,8 +654,7 @@ def train_epoch(
     if evaluator is not None:
         metrics['map'] = evaluator.evaluate()
 
-    return metrics'''
-
+    return metrics
 
 if __name__ == '__main__':
     main()

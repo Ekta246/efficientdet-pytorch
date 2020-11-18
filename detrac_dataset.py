@@ -39,6 +39,7 @@ class Track_Dataset(data.Dataset):
         track_list.sort()
         label_list.sort()
         
+        self.transform=transform
         self.track_offsets = [0]
         self.track_metadata = []
         self.all_data = []
@@ -122,12 +123,12 @@ class Track_Dataset(data.Dataset):
     def __getitem__(self,index):
         """ returns item indexed from all frames in all tracks"""
         cur = self.all_data[index]
-        #im = Image.open(cur['image']).convert('RGB')
+        im = Image.open(cur['image']).convert('RGB')
         #im = im.resize((512,512), Image.ANTIALIAS)
         label = cur['label']
-        im = imread(cur['image'])
+        #im = imread(cur['image'])
         #im = cv2.imread(str(cur['image'])) #should return images[j]
-        width = 512
+        '''width = 512
         height = 512
         dim = (width, height)
         im = cv2.resize(im, dim) #interpolation = cv2.INTER_AREA)
@@ -135,12 +136,11 @@ class Track_Dataset(data.Dataset):
         im= im.transpose(2,0,1)
         sample = [im, label]
         #im = torch.Tensor(im)
-        # __getitem__ sends to the batch in the form of lists, dicts, tensors, arrays, etc not Jpeg
-        '''if self.transform is not None:
-            transform= transforms.Compose([transforms.Resize((512,512)), transforms.ToTensor])
-            im, label = self.transform(im, label)'''
+        # __getitem__ sends to the batch in the form of lists, dicts, tensors, arrays, etc not Jpeg'''
+        if self.transform is not None:
+            im, label = self.transform(im, label)
         
-        return sample
+        return im,label
     
     def parse_labels(self,label_file):
         """
@@ -202,7 +202,7 @@ class Track_Dataset(data.Dataset):
                                 float(coords['left']) + float(coords['width']),
                                 float(coords['top'])  + float(coords['height'])])
                 det_dict = {
-                        'class':stats['vehicle_type'],
+                        'cls':stats['vehicle_type'],
                         'bbox':bbox
                         }
                 frame_boxes.append(det_dict)

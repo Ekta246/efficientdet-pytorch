@@ -7,12 +7,16 @@ from PIL import Image
 import numpy as np
 import random
 import math
-
+import pickle
+from numpy.core._exceptions import _UFuncNoLoopError
+import cv2
+import os
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
 IMAGENET_INCEPTION_MEAN = (0.5, 0.5, 0.5)
 IMAGENET_INCEPTION_STD = (0.5, 0.5, 0.5)
 
+data_path='/home/ekta/AI_current/vdot/vdot/saved_images'
 
 class ImageToNumpy:
 
@@ -21,6 +25,7 @@ class ImageToNumpy:
         if np_img.ndim < 3:
             np_img = np.expand_dims(np_img, axis=-1)
         np_img = np.moveaxis(np_img, 2, 0)  # HWC to CHW
+        
         return np_img, annotations
 
 
@@ -89,11 +94,14 @@ class ResizePad:
         interp_method = _pil_interp(self.interpolation)
         img = img.resize((scaled_w, scaled_h), interp_method)
         new_img.paste(img)
-
+        save_image= new_img.copy()
+        k=33
+        save_image.save(os.path.join(data_path, 'img_'+ str(k) + '.png'),"PNG")
+        k+=1
         if 'bbox' in anno:
             # FIXME haven't tested this path since not currently using dataset annotations for train/eval
             bbox = anno['bbox']
-            bbox[:, :4] *= img_scale
+            bbox[:, :4]=bbox[:, :4] * img_scale
             clip_boxes_(bbox, (scaled_h, scaled_w))
             valid_indices = (bbox[:, :2] < bbox[:, 2:4]).all(axis=1)
             anno['bbox'] = bbox[valid_indices, :]
@@ -143,10 +151,9 @@ class RandomResizePad:
         img = img.crop((offset_x, offset_y, right, lower))
         new_img = Image.new("RGB", (self.target_size[1], self.target_size[0]), color=self.fill_color)
         new_img.paste(img)
-
         if 'bbox' in anno:
             # FIXME not fully tested
-            bbox = anno['bbox'].copy()  # FIXME copy for debugger inspection, back to inplace
+            bbox = anno['bbox'].copy()  # FIXME copy for debugger inspection, back to inplace       
             bbox[:, :4] *= img_scale
             box_offset = np.stack([offset_y, offset_x] * 2)
             bbox -= box_offset
@@ -162,7 +169,7 @@ class RandomResizePad:
 
 class RandomFlip:
 
-    def __init__(self, horizontal=True, vertical=False, prob=0.5):
+    def __init__(self, horizontal=False, vertical=False, prob=0.5):
         self.horizontal = horizontal
         self.vertical = vertical
         self.prob = prob
@@ -171,7 +178,7 @@ class RandomFlip:
         do_horizontal = random.random() < self.prob if self.horizontal else False
         do_vertical = random.random() < self.prob if self.vertical else False
         return do_horizontal, do_vertical
-
+    
     def __call__(self, img, annotations: dict):
         do_horizontal, do_vertical = self._get_params()
         width, height = img.size
@@ -201,7 +208,8 @@ class RandomFlip:
             img = img.transpose(Image.FLIP_TOP_BOTTOM)
             if 'bbox' in annotations:
                 _flipv(annotations['bbox'])
-
+                #print(annotations['bbox'])
+            #img.save("/home/ekta/AI_current/vdot/vdot/img3.png","PNG")
         return img, annotations
 
 
@@ -227,11 +235,19 @@ class Compose:
     def __call__(self, img, annotations: dict):
         for t in self.transforms:
             img, annotations = t(img, annotations)
+        '''z=np.copy(img)
+        x=z.transpose(2,1,0)
+        im=Image.fromarray(x)
+        k=11
+        im.save(os.path.join(path, 'img_' + str(k)+'.jpg'))
+        k+=1'''
+
         return img, annotations
 
 
 def transforms_coco_eval(
         img_size=224,
+        #interpolation='bilinear',
         interpolation='bilinear',
         use_prefetcher=False,
         fill_color='mean',
@@ -245,7 +261,12 @@ def transforms_coco_eval(
             target_size=img_size, interpolation=interpolation, fill_color=fill_color),
         ImageToNumpy(),
     ]
-
+    '''image_tfl = [
+        RandomFlip(horizontal=True, prob=0.5),
+        RandomResizePad(
+            target_size=img_size, interpolation=interpolation, fill_color=fill_color),
+        ImageToNumpy(),
+    ]'''
     assert use_prefetcher, "Only supporting prefetcher usage right now"
 
     image_tf = Compose(image_tfl)
@@ -263,7 +284,7 @@ def transforms_coco_train(
     fill_color = resolve_fill_color(fill_color, mean)
 
     image_tfl = [
-        RandomFlip(horizontal=True, prob=0.5),
+        RandomFlip(vertical=True, prob=0.5),
         RandomResizePad(
             target_size=img_size, interpolation=interpolation, fill_color=fill_color),
         ImageToNumpy(),

@@ -70,7 +70,7 @@ class VdotDataset(data.Dataset):
                     #bbox=np.array([v], dtype=np.int64)
                 bboxes.append(bbox)
                 classes.append(clss)
-            det_dict = {'bbox' :np.array(bboxes, dtype=np.float32), 'cls':np.array(classes, dtype=np.int64) , 'img_size': (800, 600)}
+            det_dict = {'bbox' :np.array(bboxes, dtype=np.float32), 'cls':np.array(classes, dtype=np.int64) , 'img_size': (512, 512)}
             bboxes = []
             classes = []
             frame_boxes.append(det_dict)
